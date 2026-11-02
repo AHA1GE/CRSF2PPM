@@ -8,8 +8,8 @@ hardware-accurate even while Wi-Fi is running. The firmware speaks CRSF over a
 UART and emits a Betaflight-compatible PPM sum signal.
 
 ```
-CRSF receiver TX ──► GPIO4 (UART1 RX) ──┐
-CRSF receiver 5V ──► 5V                 ├── ESP32-C3 ── GPIO5 (RMT) ──► flight controller PPM input
+CRSF receiver TX ──► GPIO3 (UART1 RX) ──┐
+CRSF receiver 5V ──► 5V                 ├── ESP32-C3 ── GPIO4 (RMT) ──► flight controller PPM input
 CRSF receiver GND ─► GND ───────────────┘                     GND ────► flight controller GND
 ```
 
@@ -45,8 +45,8 @@ no login of its own, so use a strong WPA2 password if others share the area.
 
 | Signal | ESP32-C3 pin | Notes |
 |---|---|---|
-| CRSF receiver **TX** | GPIO4 (UART1 RX) | Receiver TX, not RX. Configurable (valid C3 GPIO). |
-| PPM output | GPIO5 | RMT TX; 3.3 V logic. Configurable. |
+| CRSF receiver **TX** | GPIO3 (UART1 RX) | Receiver TX, not RX. Configurable (valid C3 GPIO). |
+| PPM output | GPIO4 | RMT TX; 3.3 V logic. Configurable. |
 | Power | 5V / GND | Power the board from USB or a stable 5 V source. |
 | Ground | GND | Receiver, converter and flight controller grounds must be common. |
 
@@ -198,8 +198,8 @@ state and free heap. This is useful when Wi-Fi is not available.
 | Failsafe mode / timeout | preset / 500 ms |
 | Frame period / pulse width | 22500 µs / 400 µs |
 | Polarity | normal (idle low) |
-| CRSF baud / RX pin | 420000 / GPIO4 |
-| PPM pin | GPIO5 |
+| CRSF baud / RX pin | 420000 / GPIO3 |
+| PPM pin | GPIO4 |
 | AP password | `crsf2ppm` |
 | STA | disabled |
 

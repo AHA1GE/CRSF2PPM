@@ -40,8 +40,8 @@ void configSetDefaults(AppConfig &c) {
   c.failsafeMode = FS_PRESET;
   c.failsafeMs = 500;
   c.crsfBaud = 420000;
-  c.crsfPin = 4;
-  c.ppmPin = 5;
+  c.crsfPin = 3;
+  c.ppmPin = 4;
   copyStr(c.apPass, sizeof(c.apPass), "crsf2ppm");
 }
 

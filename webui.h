@@ -222,8 +222,8 @@ button:disabled{opacity:.4;cursor:default}
     <div class="wire">
       <table>
         <tbody>
-          <tr><td>CRSF receiver TX</td><td class="mono">&rarr; <span id="wireCrsfPin">GPIO4</span> (UART1 RX)</td></tr>
-          <tr><td>PPM output</td><td class="mono"><span id="wirePpmPin">GPIO5</span> &rarr; flight controller PPM input</td></tr>
+          <tr><td>CRSF receiver TX</td><td class="mono">&rarr; <span id="wireCrsfPin">GPIO3</span> (UART1 RX)</td></tr>
+          <tr><td>PPM output</td><td class="mono"><span id="wirePpmPin">GPIO4</span> &rarr; flight controller PPM input</td></tr>
           <tr><td>Power</td><td class="mono">Receiver 5V and GND from the board's 5V/GND (or USB powered board)</td></tr>
           <tr><td>Ground</td><td class="mono">Receiver GND, board GND and flight-controller GND must be common</td></tr>
           <tr><td>Logic level</td><td class="mono">ESP32-C3 3.3 V output; PPM input on FCs is normally 3.3 V tolerant</td></tr>
@@ -336,8 +336,8 @@ function applyCount() {
   }
 }
 function updateWiring() {
-  $('wireCrsfPin').textContent = 'GPIO' + ($('crsfPin').value || '4');
-  $('wirePpmPin').textContent = 'GPIO' + ($('ppmPin').value || '5');
+  $('wireCrsfPin').textContent = 'GPIO' + ($('crsfPin').value || '3');
+  $('wirePpmPin').textContent = 'GPIO' + ($('ppmPin').value || '4');
 }
 async function loadConfig() {
   cfg = await api('/api/config');
