@@ -140,6 +140,7 @@ static void ppmTask(void *) {
     stateSetOutputs(vals, (uint16_t)duration, !fresh, ok);
 
     if (!ok) {
+      appSetError("PPM RMT write failed");
       vTaskDelay(pdMS_TO_TICKS(5));
     }
   }

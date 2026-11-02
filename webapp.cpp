@@ -9,10 +9,12 @@
 #include "app.h"
 #include "config.h"
 #include "crsf.h"
+#include "led.h"
 #include "state.h"
 #include "webui.h"
 
 static WebServer server(80);
+static bool s_webStarted = false;
 
 static String jesc(const char *s) {
   String out;
@@ -90,7 +92,9 @@ static void handleStatus() {
   j.reserve(1400);
   j += "{\"version\":\"" FW_VERSION "\"";
   j += ",\"uptime_ms\":" + String((unsigned long)now);
-  j += ",\"wifi\":{\"mode\":\"";
+  j += ",\"wifi\":{\"enabled\":";
+  j += appWifiEnabled() ? "true" : "false";
+  j += ",\"mode\":\"";
   j += (WiFi.getMode() == WIFI_AP_STA) ? "AP+STA" : "AP";
   j += "\",\"ap_ssid\":\"" + jesc(gApSsid) + "\"";
   j += ",\"ap_ip\":\"" + WiFi.softAPIP().toString() + "\"";
@@ -124,6 +128,10 @@ static void handleStatus() {
 
   j += ",\"test\":";
   j += gTestMode ? "true" : "false";
+  j += ",\"led\":\"" + String(ledModeName()) + "\"";
+  j += ",\"error\":";
+  j += appHasError() ? "true" : "false";
+  j += ",\"error_reason\":\"" + jesc(appErrorReason()) + "\"";
   j += ",\"heap\":" + String(ESP.getFreeHeap());
   j += ",\"raw\":";
   appendU16Array(j, st.raw, CH_COUNT);
@@ -307,10 +315,28 @@ void webSetup() {
   server.on("/api/selftest", HTTP_POST, handleSelfTest);
   server.on("/api/reboot", HTTP_POST, handleReboot);
   server.onNotFound(handleNotFound);
+}
+
+void webStart() {
+  if (s_webStarted) {
+    return;
+  }
   server.begin();
+  s_webStarted = true;
   Serial.println("[WEB] HTTP server on port 80");
 }
 
+void webStop() {
+  if (!s_webStarted) {
+    return;
+  }
+  server.stop();
+  s_webStarted = false;
+  Serial.println("[WEB] HTTP server stopped");
+}
+
 void webLoop() {
-  server.handleClient();
+  if (s_webStarted) {
+    server.handleClient();
+  }
 }

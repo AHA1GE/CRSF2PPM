@@ -3,6 +3,8 @@
 #include <Preferences.h>
 #include <cstring>
 
+#include "board_io.h"
+
 AppConfig gConfig;
 portMUX_TYPE gCfgMux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -82,6 +84,11 @@ bool configValidate(const AppConfig &c, String &err) {
   }
   if (c.crsfPin == c.ppmPin) {
     err = "CRSF and PPM pins must differ";
+    return false;
+  }
+  if (c.crsfPin == STATUS_LED_PIN || c.crsfPin == WIFI_BTN_PIN ||
+      c.ppmPin == STATUS_LED_PIN || c.ppmPin == WIFI_BTN_PIN) {
+    err = "GPIO8/GPIO9 are reserved for the status LED and Wi-Fi button";
     return false;
   }
 

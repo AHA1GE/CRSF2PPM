@@ -22,6 +22,9 @@ CRSF receiver GND ─► GND ───────────────┘   
 - Polarity, frame period, pulse width, baud, pins and failsafe timeout configurable.
 - Live web UI: channel bars, CRSF link statistics, mapping table, test mode.
 - Wi-Fi access point `CRSF2PPM-XXXX` (default password `crsf2ppm`), or AP+STA.
+- **Wi-Fi is off after every power-up**; the GPIO9 BOOT button toggles it.
+- Status LED on GPIO8: breathing = no link, solid = link, slow flash = Wi-Fi
+  on, fast blink = latched fault (reset required).
 - Config stored in NVS and reloaded on boot; mDNS at `crsf2ppm.local`.
 - Serial console for bench diagnostics and a CRSF parser self-test.
 - No external Arduino libraries; only the ESP32 core is required.
@@ -29,17 +32,22 @@ CRSF receiver GND ─► GND ───────────────┘   
 ## Quick start
 
 1. Flash the firmware (see [Build and flash](#build-and-flash)).
-2. Power the board. It starts a Wi-Fi AP named `CRSF2PPM-XXXX`, where `XXXX` is
-   derived from the ESP32's AP MAC address.
-3. Connect a phone/laptop to that AP with the password `crsf2ppm` and open
+2. Power the board. **Wi-Fi is off by default**; the status LED shows the CRSF
+   link state.
+3. Press the **BOOT button (GPIO9)** to enable Wi-Fi. The LED starts flashing
+   slowly and the board starts an AP named `CRSF2PPM-XXXX`, where `XXXX` is
+   derived from the ESP32's AP MAC address. Press BOOT again to turn Wi-Fi off.
+4. Connect a phone/laptop to that AP with the password `crsf2ppm` and open
    **http://192.168.4.1/** (or `http://crsf2ppm.local/`).
-4. Wire the CRSF receiver and flight controller as shown above, then set the
+5. Wire the CRSF receiver and flight controller as shown above, then set the
    channel mapping, failsafe values and output timing in the web UI.
-5. Use **Test mode** to sweep all outputs without a receiver. Verify with a
+6. Use **Test mode** to sweep all outputs without a receiver. Verify with a
    servo or scope before connecting a flight controller.
 
 The default AP password can be changed in the **Network** card. The web UI has
 no login of its own, so use a strong WPA2 password if others share the area.
+After any reboot (including a settings change that reboots), Wi-Fi returns to
+OFF and must be enabled again with the BOOT button.
 
 ## Wiring
 
@@ -49,10 +57,40 @@ no login of its own, so use a strong WPA2 password if others share the area.
 | PPM output | GPIO4 | RMT TX; 3.3 V logic. Configurable. |
 | Power | 5V / GND | Power the board from USB or a stable 5 V source. |
 | Ground | GND | Receiver, converter and flight controller grounds must be common. |
+| Status LED | GPIO8 | Resistor → LED → GND (active-high). Reserved. |
+| Wi-Fi button | GPIO9 / BOOT | Button to GND, usually onboard. Press **after boot**. Reserved. |
 
 Do not feed more than 3.3 V into a GPIO. ESP32-C3 GPIOs 11–17 are used by SPI
-flash; GPIO18/19 are USB. The firmware only accepts GPIO0–10, 20 and 21, and
-refuses to use the same pin for CRSF and PPM.
+flash; GPIO18/19 are USB. The firmware only accepts GPIO0–10, 20 and 21, refuses
+GPIO8/9 (status LED and Wi-Fi button), and refuses to use the same pin for CRSF
+and PPM.
+
+## Status LED and Wi-Fi button
+
+The status LED on **GPIO8** is active-high by default and driven with PWM for
+breathing. Priority is: latched fault, then Wi-Fi, then CRSF link.
+
+| Pattern | Meaning |
+|---|---|
+| Slow breathing, 1 Hz | No valid CRSF RC frames (never linked or timed out) |
+| Solid on | Valid CRSF link |
+| Slow flash, 1 Hz | Wi-Fi is enabled (AP on) |
+| Fast blink, 5 Hz | Latched fault — **reset required** |
+
+A latched fault is set by a PPM/RMT initialization or transmission failure, or
+by a Wi-Fi AP start failure. It stays active across Wi-Fi toggling until the
+board is reset. CRSF CRC errors are counted and shown in the UI but do **not**
+latch the fault, since they can be transient RF noise.
+
+Press **GPIO9 (BOOT)** after boot to toggle Wi-Fi. Holding it during reset enters
+the ESP32 bootloader, so press it only after the firmware is running. The button
+is debounced in software. There is also a serial command `w` for the same toggle.
+
+**GPIO8 is a strapping pin**, and many ESP32-C3 SuperMini boards fit a WS2812
+there instead of a plain LED. This firmware drives GPIO8 as a plain LED/PWM
+output, not a WS2812 data line; use a discrete LED (or check your board) for the
+status indication. If your LED is wired active-low, set
+`STATUS_LED_ACTIVE_LOW` to `1` in `led.cpp`.
 
 ## Build and flash
 
@@ -127,7 +165,8 @@ controller's own failsafe checks before flight.
 
 ## Web interface
 
-Open `http://192.168.4.1/` while connected to the device AP.
+Press BOOT (GPIO9) to enable Wi-Fi, then open `http://192.168.4.1/` while
+connected to the device AP.
 
 - **Live channels** — CRSF frame rate, PPM frame rate, RSSI/LQ/SNR, CRC errors,
   measured PPM period, channel bars and raw CRSF values.
@@ -142,7 +181,8 @@ Open `http://192.168.4.1/` while connected to the device AP.
 
 Changing the CRSF/PPM pins, baud, AP password or STA credentials saves the config
 and reboots automatically. Mapping, timing, polarity and failsafe changes apply
-on the next PPM frame without a reboot.
+on the next PPM frame without a reboot. **After any reboot, Wi-Fi is off again;
+press BOOT to re-enable it.**
 
 ### HTTP API
 
@@ -179,14 +219,17 @@ line-based:
 | Key | Action |
 |---|---|
 | `s` | Print status |
+| `w` | Toggle Wi-Fi on/off (same as the BOOT button) |
 | `t` | Toggle test mode |
 | `x` | Run the CRSF parser self-test |
+| `e` | Simulate a latched fault (bench; reset to clear) |
 | `r` | Reboot |
 | `d` | Restore defaults and reboot |
 | `?` | Help |
 
 Boot and periodic logs include PPM frame rate/period, error counters, link
-state and free heap. This is useful when Wi-Fi is not available.
+state, Wi-Fi/LED state, button state and free heap. This is useful when Wi-Fi
+is not available.
 
 ## Configuration defaults
 
@@ -200,29 +243,46 @@ state and free heap. This is useful when Wi-Fi is not available.
 | Polarity | normal (idle low) |
 | CRSF baud / RX pin | 420000 / GPIO3 |
 | PPM pin | GPIO4 |
+| Status LED / Wi-Fi button | GPIO8 / GPIO9 (reserved) |
+| Wi-Fi at power-up | OFF (BOOT button or serial `w` to enable) |
 | AP password | `crsf2ppm` |
 | STA | disabled |
 
 ## Bench verification
 
-The firmware in this repository was compiled and flashed to an ESP32-C3
-(QFN32, rev v0.4, 4 MB flash) and verified on the bench:
+The firmware was compiled and flashed to ESP32-C3 boards (QFN32, rev v0.4,
+4 MB flash) and verified on the bench:
 
-- PPM runs at ~44 frames/s with a ~22.53 ms measured frame period and zero RMT
+- PPM runs at ~44 frames/s with a ~22.5 ms measured frame period and zero RMT
   errors; test mode produced a clean channel sweep.
+- A live ELRS/CRSF receiver was verified on UART1: 75 frames/s, RSSI −38 dBm,
+  LQ 100 %, and the decoded channels matched the transmitter (AER centred,
+  throttle high).
 - The CRSF parser self-test passes for a valid 16-channel frame and rejects a
   corrupted CRC frame.
 - The web page, `/api/status`, `/api/config`, `/api/test`, `/api/selftest`, and
   `/api/reboot` were exercised; mapping CH3→output 1 produced the expected
   1068 µs from raw 300, and both preset and hold failsafe behaviour were
   observed.
+- Wi-Fi is OFF at power-up. Toggling with the serial `w` command (the same
+  action as the BOOT button) started/stopped the AP and HTTP server, and
+  `/api/status` returned HTTP 200 after a runtime Wi-Fi start.
+- The status LED state machine was verified through the reported `led` state:
+  breathing with no link, solid after a valid RC frame, slow flash while Wi-Fi
+  is on, and 5 Hz fast blink after a simulated latched fault. A reset cleared
+  the fault.
+- The complete feature set was bench-verified end to end after repairing an
+  open PPM signal wire: physical BOOT-button Wi-Fi toggling, LED patterns, web
+  UI, CRSF link, and PPM output to the flight controller.
 - Configuration survived reboots via NVS.
 
-Not covered in that session: a live CRSF receiver on the UART, oscilloscope
-measurement of the PPM waveform, and joining an external STA network. Validate
-those on your hardware before flight. PPM timing is generated in hardware but
-the converter is not a certified safety device; always check failsafe and
-output behaviour with the flight controller disarmed/props removed.
+Not covered: an oscilloscope capture of the PPM waveform, joining an external
+STA network, and visual observation of the LED on every board variant. Some
+ESP32-C3 SuperMini boards drive a WS2812 from GPIO8 rather than a plain LED;
+this firmware does not drive WS2812 data. Validate your board's LED and PPM
+wiring before flight. PPM timing is generated in hardware, but the converter is
+not a certified safety device; always check failsafe and output behaviour with
+the flight controller disarmed/props removed.
 
 ### Troubleshooting notes
 
@@ -230,9 +290,16 @@ output behaviour with the flight controller disarmed/props removed.
   with the RC link. Try a different client, disable client Wi-Fi power saving,
   or move the device away from congested access points. The converter keeps
   running and PPM output is unaffected by HTTP stalls.
-- If the AP is not visible, check that the board booted (serial log) and that
-  the last configured AP password is known. `d` on the serial console restores
-  defaults.
+- If the AP is not visible, Wi-Fi is off by default. Press the BOOT button
+  (GPIO9) after boot or send `w` over USB serial. Check the serial log and the
+  status LED (slow flash = Wi-Fi on). If the last configured AP password is
+  unknown, `d` on the serial console restores defaults.
+- If the status LED fast-blinks (5 Hz), a fault has latched and the board needs
+  a reset. Run `s` over USB serial to see the stored error reason. A PPM/RMT
+  failure or a failed Wi-Fi AP start sets this fault.
+- If the status LED breathes but CRSF is connected, check the CRSF TX → GPIO3
+  wiring, receiver mode and baud. The UI/serial status shows CRSF frame and CRC
+  counters; a link timeout is not a fault.
 - If the PPM output does not drive the FC, check common ground, signal polarity,
   and whether the FC expects PPM on that input. Use test mode and a servo to
   verify the signal first.

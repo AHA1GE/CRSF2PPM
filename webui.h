@@ -141,6 +141,7 @@ button:disabled{opacity:.4;cursor:default}
   <div class="statusBox">
     <div id="pill" class="pill">CONNECTING&hellip;</div>
     <div id="uptime" class="tiny">&mdash;</div>
+    <div id="fault" class="tiny" style="color:var(--bad)"></div>
   </div>
 </header>
 
@@ -214,7 +215,7 @@ button:disabled{opacity:.4;cursor:default}
       <label>CRSF RX pin<input id="crsfPin" type="number" min="0" max="21"></label>
       <label>PPM out pin<input id="ppmPin" type="number" min="0" max="21"></label>
     </div>
-    <p class="hint">Changing pins, baud, or Wi-Fi settings reboots the board. Default AP password is <span class="mono">crsf2ppm</span>; there is no web login, so set a strong AP password.</p>
+    <p class="hint">Wi-Fi is <b>OFF after every power-up</b>. Press the BOOT button (GPIO9) to enable it; the status LED flashes slowly while Wi-Fi is on. Press it again to turn Wi-Fi off. Settings that reboot the board also leave Wi-Fi off. Default AP password is <span class="mono">crsf2ppm</span>; there is no web login, so set a strong AP password.</p>
   </section>
 
   <section class="card wide">
@@ -227,9 +228,12 @@ button:disabled{opacity:.4;cursor:default}
           <tr><td>Power</td><td class="mono">Receiver 5V and GND from the board's 5V/GND (or USB powered board)</td></tr>
           <tr><td>Ground</td><td class="mono">Receiver GND, board GND and flight-controller GND must be common</td></tr>
           <tr><td>Logic level</td><td class="mono">ESP32-C3 3.3 V output; PPM input on FCs is normally 3.3 V tolerant</td></tr>
+          <tr><td>Status LED</td><td class="mono">GPIO8 &rarr; resistor &rarr; LED &rarr; GND (active-high); reserved</td></tr>
+          <tr><td>Wi-Fi button</td><td class="mono">GPIO9 BOOT &rarr; GND (usually onboard); press after boot to toggle Wi-Fi</td></tr>
         </tbody>
       </table>
     </div>
+    <p class="hint">Status LED: solid = CRSF link, breathing = no link, slow flash = Wi-Fi on, fast blink = latched fault (reset required). GPIO8/9 are reserved and cannot be selected for CRSF or PPM. GPIO8 is a strapping pin; some boards fit a WS2812 there rather than a plain LED, which this firmware does not drive.</p>
     <p class="hint">Before connecting a flight controller, verify the PPM output on a scope or use test mode with a servo. Default failsafe holds throttle low (output 3 = 1000 &micro;s) until the first valid CRSF frame.</p>
   </section>
 </main>
@@ -372,7 +376,10 @@ function render(s) {
   const c = s.crsf, p = s.ppm;
   $('uptime').textContent = 'UP ' + fmtDur(s.uptime_ms);
   const pill = $('pill');
-  if (s.test) {
+  if (s.error) {
+    pill.className = 'pill bad';
+    pill.textContent = 'FAULT';
+  } else if (s.test) {
     pill.className = 'pill test';
     pill.textContent = 'TEST MODE';
   } else if (c.link_ok) {
@@ -385,6 +392,7 @@ function render(s) {
     pill.className = 'pill bad';
     pill.textContent = 'NO LINK';
   }
+  $('fault').textContent = s.error ? ('FAULT: ' + s.error_reason) : '';
 
   const rssi = c.stats_valid ? (c.rssi + ' dBm') : '—';
   const lq = c.stats_valid ? (c.lq + '%') : '—';
@@ -394,7 +402,7 @@ function render(s) {
   $('stats').innerHTML =
     stat(c.fps, 'CRSF fps') + stat(p.fps, 'PPM fps') + stat(rssi, 'RSSI') +
     stat(lq, 'LQ') + stat(snr, 'SNR') + stat(c.crc_errors, 'CRC errors') +
-    stat(period, 'PPM frame') + stat(age, 'Last RC');
+    stat(period, 'PPM frame') + stat(age, 'Last RC') + stat(s.led || '—', 'LED');
 
   for (let i = 0; i < CH; i++) {
     const el = chEls[i];
@@ -432,7 +440,7 @@ function render(s) {
   const testBtn = $('test');
   testBtn.classList.toggle('active', s.test);
   testBtn.textContent = s.test ? 'Stop test mode' : 'Test mode';
-  document.title = (s.test ? 'TEST · ' : (c.link_ok ? 'LINK · ' : '')) + 'CRSF2PPM';
+  document.title = (s.error ? 'FAULT · ' : (s.test ? 'TEST · ' : (c.link_ok ? 'LINK · ' : ''))) + 'CRSF2PPM';
 }
 async function save() {
   const body = new URLSearchParams();
@@ -462,8 +470,8 @@ async function save() {
     $('apPass').value = '';
     $('staPass').value = '';
     if (r.reboot) {
-      toast('Saved. Rebooting - reconnect to the AP, then reload this page.');
-      setTimeout(() => location.reload(), 12000);
+      toast('Saved. Rebooting - after restart press BOOT (GPIO9) to enable Wi-Fi, then reload this page.');
+      setTimeout(() => location.reload(), 14000);
     } else {
       toast('Configuration saved.');
       await loadConfig();
@@ -490,7 +498,7 @@ async function toggleTest() {
 async function reboot() {
   try {
     await api('/api/reboot', { method: 'POST' });
-    toast('Rebooting. Reload the page in a few seconds.');
+    toast('Rebooting. After restart, press BOOT (GPIO9) to enable Wi-Fi again, then reload.');
   } catch (e) {
     toast(e.message, true);
   }
