@@ -8,9 +8,10 @@
 #include "config.h"
 #include "state.h"
 
-// Set to 1 if the status LED is wired from 3.3 V through the LED to GPIO8
-// (active-low). The default assumes GPIO8 -> resistor -> LED -> GND.
-#define STATUS_LED_ACTIVE_LOW 0
+// Set to 0 if the status LED is wired GPIO8 -> resistor -> LED -> GND
+// (active-high). The default assumes the common SuperMini wiring of 3.3 V ->
+// resistor -> LED -> GPIO8, i.e. the pin sinks current (active-low).
+#define STATUS_LED_ACTIVE_LOW 1
 
 #define LED_PWM_FREQ 5000
 #define LED_PWM_BITS 10

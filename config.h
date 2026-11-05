@@ -2,11 +2,11 @@
 
 #include <Arduino.h>
 
-#define FW_VERSION "1.0.0"
+#define FW_VERSION "1.1.0"
 
 #define CH_COUNT 16
 #define CFG_MAGIC 0x4332504DUL  // 'C2PM'
-#define CFG_VERSION 1
+#define CFG_VERSION 2
 
 enum FailsafeMode : uint8_t {
   FS_HOLD = 0,
@@ -20,15 +20,15 @@ struct AppConfig {
   uint8_t count;              // number of PPM output slots, 1..16
   uint8_t map[CH_COUNT];      // output slot -> CRSF source channel (0-based)
   uint16_t failUs[CH_COUNT];  // failsafe pulse width per output slot
+  uint8_t rev[CH_COUNT];      // per-output reverse, 0 = normal, 1 = mirrored
   uint16_t frameUs;           // nominal PPM frame period
   uint16_t pulseUs;           // PPM pulse width
-  uint8_t invert;             // 0 = normal, 1 = inverted
+  uint8_t invert;             // 0 = normal, 1 = inverted (PPM polarity)
   uint8_t failsafeMode;       // FailsafeMode
   uint16_t failsafeMs;        // link timeout before failsafe
   uint32_t crsfBaud;
   int8_t crsfPin;             // UART RX
   int8_t ppmPin;              // RMT TX
-  char apPass[32];
   char staSsid[33];
   char staPass[65];
 };

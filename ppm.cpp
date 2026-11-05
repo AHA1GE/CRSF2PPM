@@ -78,6 +78,12 @@ static void ppmTask(void *) {
       } else {
         v = cfg.failUs[i];
       }
+      // Per-output reverse mirrors live/test values around 1500 us
+      // (800 <-> 2200). Preset failsafe values are already final output
+      // widths and are deliberately not reversed.
+      if ((test || fresh) && cfg.rev[i]) {
+        v = (uint16_t)(3000 - v);
+      }
       if (v < 800) {
         v = 800;
       } else if (v > 2200) {

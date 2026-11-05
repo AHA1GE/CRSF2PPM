@@ -105,7 +105,9 @@ static bool wifiStart() {
   }
   WiFi.setSleep(false);  // keep the AP responsive while the Web UI is polled
 
-  if (!WiFi.softAP(gApSsid, cfg.apPass)) {
+  // No passphrase: the config portal is deliberately an open AP so a phone
+  // can join it without typing a password. BOOT still turns Wi-Fi off.
+  if (!WiFi.softAP(gApSsid)) {
     WiFi.mode(WIFI_OFF);
     appSetError("Wi-Fi AP start failed");
     Serial.println("[WIFI] softAP start FAILED");
@@ -129,7 +131,7 @@ static bool wifiStart() {
     Serial.println("[WIFI] mDNS start failed");
   }
 
-  Serial.printf("[WIFI] ON: AP \"%s\" (WPA2)  ->  http://%s/\n", gApSsid,
+  Serial.printf("[WIFI] ON: AP \"%s\" (OPEN, captive portal)  ->  http://%s/\n", gApSsid,
                 WiFi.softAPIP().toString().c_str());
   return true;
 }
@@ -350,7 +352,7 @@ void setup() {
   s_lastPpmCount = stateSnapshot().ppmFrames;
 
   Serial.println("----------------------------------------");
-  Serial.printf(" Status LED: GPIO%d (active-high), Wi-Fi button: GPIO%d (BOOT)\n",
+  Serial.printf(" Status LED: GPIO%d (active-low), Wi-Fi button: GPIO%d (BOOT)\n",
                 STATUS_LED_PIN, WIFI_BTN_PIN);
   Serial.printf(" Wi-Fi: OFF after power-up. AP \"%s\" when enabled.\n", gApSsid);
   Serial.printf(" Press BOOT (GPIO%d) or send 'w' to toggle Wi-Fi.\n", WIFI_BTN_PIN);

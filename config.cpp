@@ -14,13 +14,6 @@ static bool validPin(int p) {
   return (p >= 0 && p <= 10) || p == 20 || p == 21;
 }
 
-static void copyStr(char *dst, size_t n, const char *src) {
-  if (src == nullptr) {
-    src = "";
-  }
-  strlcpy(dst, src, n);
-}
-
 static bool validBaud(uint32_t b) {
   return b == 420000 || b == 400000 || b == 115200;
 }
@@ -33,6 +26,7 @@ void configSetDefaults(AppConfig &c) {
   for (uint8_t i = 0; i < CH_COUNT; i++) {
     c.map[i] = i;
     c.failUs[i] = 1500;
+    c.rev[i] = 0;
   }
   // AETR: output slot 3 is normally throttle. Preset it low on failsafe.
   c.failUs[2] = 1000;
@@ -44,7 +38,7 @@ void configSetDefaults(AppConfig &c) {
   c.crsfBaud = 420000;
   c.crsfPin = 3;
   c.ppmPin = 4;
-  copyStr(c.apPass, sizeof(c.apPass), "crsf2ppm");
+  // The access point is open (no passphrase); the portal is the only service.
 }
 
 bool configValidate(const AppConfig &c, String &err) {
@@ -55,6 +49,10 @@ bool configValidate(const AppConfig &c, String &err) {
   for (uint8_t i = 0; i < CH_COUNT; i++) {
     if (c.map[i] >= CH_COUNT) {
       err = "Channel mapping out of range";
+      return false;
+    }
+    if (c.rev[i] > 1) {
+      err = "Per-channel reverse must be 0 or 1";
       return false;
     }
     if (c.failUs[i] < 800 || c.failUs[i] > 2200) {
@@ -92,11 +90,6 @@ bool configValidate(const AppConfig &c, String &err) {
     return false;
   }
 
-  size_t apLen = strnlen(c.apPass, sizeof(c.apPass));
-  if (apLen < 8 || apLen >= sizeof(c.apPass)) {
-    err = "AP password must be 8-31 characters";
-    return false;
-  }
   size_t ssidLen = strnlen(c.staSsid, sizeof(c.staSsid));
   if (ssidLen >= sizeof(c.staSsid)) {
     err = "STA SSID is too long";
@@ -121,14 +114,13 @@ bool configLoad() {
   Preferences prefs;
   bool ok = false;
   if (prefs.begin("crsf2ppm", true)) {
-    size_t n = prefs.getBytesLength("cfg");
-    if (n == sizeof(c) && prefs.getBytes("cfg", &c, sizeof(c)) == sizeof(c)) {
+    const size_t n = prefs.getBytesLength("cfg");
+    if (n == sizeof(AppConfig) && prefs.getBytes("cfg", &c, sizeof(c)) == sizeof(c)) {
       ok = true;
     }
     prefs.end();
   }
 
-  c.apPass[sizeof(c.apPass) - 1] = '\0';
   c.staSsid[sizeof(c.staSsid) - 1] = '\0';
   c.staPass[sizeof(c.staPass) - 1] = '\0';
 
@@ -187,6 +179,5 @@ AppConfig configSnapshot() {
 
 bool configNeedsReboot(const AppConfig &a, const AppConfig &b) {
   return a.crsfBaud != b.crsfBaud || a.crsfPin != b.crsfPin || a.ppmPin != b.ppmPin ||
-         strcmp(a.apPass, b.apPass) != 0 || strcmp(a.staSsid, b.staSsid) != 0 ||
-         strcmp(a.staPass, b.staPass) != 0;
+         strcmp(a.staSsid, b.staSsid) != 0 || strcmp(a.staPass, b.staPass) != 0;
 }

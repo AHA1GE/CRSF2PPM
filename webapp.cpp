@@ -1,6 +1,7 @@
 #include "webapp.h"
 
 #include <Arduino.h>
+#include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <WebServer.h>
 #include <WiFi.h>
@@ -14,6 +15,7 @@
 #include "webui.h"
 
 static WebServer server(80);
+static DNSServer s_dns;
 static bool s_webStarted = false;
 
 static String jesc(const char *s) {
@@ -44,13 +46,70 @@ static String jesc(const char *s) {
   return out;
 }
 
+// The bundled UI sends X-Lang with every request; plain API clients can use
+// Accept-Language instead. Only the first language tag is considered.
+static bool wantsChinese() {
+  String lang = server.header("X-Lang");
+  if (lang.length() == 0) {
+    lang = server.header("Accept-Language");
+  }
+  lang.trim();
+  lang.toLowerCase();
+  return lang.startsWith("zh");
+}
+
+struct ErrorTranslation {
+  const char *en;
+  const char *zh;
+};
+
+static const ErrorTranslation kErrorTranslations[] = {
+    {"not found", "未找到"},
+    {"PPM output count must be 1-16", "PPM 输出数量必须为 1-16"},
+    {"Channel mapping out of range", "通道映射超出范围"},
+    {"Per-channel reverse must be 0 or 1", "每通道反向值必须为 0 或 1"},
+    {"Failsafe values must be 800-2200 us", "失控保护值必须在 800-2200 µs 之间"},
+    {"Frame period must be 15000-30000 us", "帧周期必须在 15000-30000 µs 之间"},
+    {"Pulse width must be 200-700 us", "脉冲宽度必须在 200-700 µs 之间"},
+    {"Failsafe timeout must be 100-5000 ms", "失控保护超时必须在 100-5000 ms 之间"},
+    {"Unsupported CRSF baud rate", "不支持该 CRSF 波特率"},
+    {"Invalid GPIO for this chip", "该 GPIO 对此芯片无效"},
+    {"CRSF and PPM pins must differ", "CRSF 与 PPM 引脚不能相同"},
+    {"GPIO8/GPIO9 are reserved for the status LED and Wi-Fi button",
+     "GPIO8/GPIO9 已保留给状态 LED 和 Wi-Fi 按键"},
+    {"STA SSID is too long", "STA SSID 过长"},
+    {"STA password is too long", "STA 密码过长"},
+    {"STA password must be 8-64 characters", "STA 密码长度必须为 8-64 个字符"},
+    {"STA password required for the configured SSID", "已设置 STA SSID，必须填写 STA 密码"},
+};
+
+static String localizeMessage(const String &message) {
+  if (!wantsChinese()) {
+    return message;
+  }
+  for (const ErrorTranslation &t : kErrorTranslations) {
+    if (message == t.en) {
+      return String(t.zh);
+    }
+  }
+  return message;
+}
+
+static String portalUrl() {
+  String url = "http://";
+  url += WiFi.softAPIP().toString();
+  url += "/";
+  return url;
+}
+
 static void sendJson(int code, const String &body) {
   server.sendHeader("Cache-Control", "no-store");
   server.send(code, "application/json", body);
 }
 
 static void sendError(int code, const String &message) {
-  sendJson(code, String("{\"ok\":false,\"error\":\"") + jesc(message.c_str()) + "\"}");
+  const String text = localizeMessage(message);
+  sendJson(code, String("{\"ok\":false,\"error\":\"") + jesc(text.c_str()) + "\"}");
 }
 
 static void appendU16Array(String &j, const uint16_t *v, uint8_t n, bool oneBased = false) {
@@ -75,8 +134,20 @@ static void appendMapArray(String &j, const uint8_t *v, uint8_t n) {
   j += ']';
 }
 
+static void appendFlagArray(String &j, const uint8_t *v, uint8_t n) {
+  j += '[';
+  for (uint8_t i = 0; i < n; i++) {
+    if (i) {
+      j += ',';
+    }
+    j += v[i] ? '1' : '0';
+  }
+  j += ']';
+}
+
 static void handleRoot() {
   server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("Captive-Portal", portalUrl());
   server.send_P(200, "text/html", INDEX_HTML);
 }
 
@@ -149,6 +220,8 @@ static void handleConfigGet() {
   j += ",\"count\":" + String(c.count);
   j += ",\"map\":";
   appendMapArray(j, c.map, CH_COUNT);
+  j += ",\"rev\":";
+  appendFlagArray(j, c.rev, CH_COUNT);
   j += ",\"fs\":";
   appendU16Array(j, c.failUs, CH_COUNT);
   j += ",\"frame_us\":" + String(c.frameUs);
@@ -161,7 +234,7 @@ static void handleConfigGet() {
   j += ",\"crsf_pin\":" + String((int)c.crsfPin);
   j += ",\"ppm_pin\":" + String((int)c.ppmPin);
   j += ",\"ap_ssid\":\"" + jesc(gApSsid) + "\"";
-  j += ",\"ap_pass_set\":true";
+  j += ",\"ap_open\":true";
   j += ",\"sta_ssid\":\"" + jesc(c.staSsid) + "\"";
   j += ",\"sta_pass_set\":";
   j += (strlen(c.staPass) > 0) ? "true" : "false";
@@ -181,6 +254,11 @@ static void handleConfigPost() {
     if (server.hasArg(key)) {
       const int src = server.arg(key).toInt();
       next.map[i] = (uint8_t)(src - 1);
+    }
+    key = String("rev") + i;
+    if (server.hasArg(key)) {
+      const String v = server.arg(key);
+      next.rev[i] = (v == "1" || v == "true" || v == "on") ? 1 : 0;
     }
     key = String("fs") + i;
     if (server.hasArg(key)) {
@@ -210,17 +288,6 @@ static void handleConfigPost() {
   }
   if (server.hasArg("ppm_pin")) {
     next.ppmPin = (int8_t)server.arg("ppm_pin").toInt();
-  }
-
-  if (server.hasArg("ap_pass")) {
-    const String v = server.arg("ap_pass");
-    if (v.length() > 0) {
-      if (v.length() < 8 || v.length() >= sizeof(next.apPass)) {
-        sendError(400, "AP password must be 8-31 characters");
-        return;
-      }
-      strlcpy(next.apPass, v.c_str(), sizeof(next.apPass));
-    }
   }
 
   if (server.hasArg("sta_ssid")) {
@@ -257,8 +324,12 @@ static void handleConfigPost() {
   const bool reboot = configNeedsReboot(old, next);
   configCommit(next);
 
-  Serial.printf("[CFG] web update: count=%u frame=%uus pulse=%uus invert=%u fs=%s/%ums\n",
-                next.count, next.frameUs, next.pulseUs, next.invert,
+  uint8_t revCount = 0;
+  for (uint8_t i = 0; i < CH_COUNT; i++) {
+    revCount += next.rev[i] ? 1 : 0;
+  }
+  Serial.printf("[CFG] web update: count=%u frame=%uus pulse=%uus invert=%u rev=%u fs=%s/%ums\n",
+                next.count, next.frameUs, next.pulseUs, next.invert, revCount,
                 next.failsafeMode == FS_HOLD ? "hold" : "preset", next.failsafeMs);
   if (reboot) {
     Serial.println("[CFG] hardware/network change -> reboot required");
@@ -303,10 +374,26 @@ static void handleReboot() {
 }
 
 static void handleNotFound() {
-  sendError(404, "not found");
+  const String uri = server.uri();
+  if (uri.startsWith("/api/")) {
+    sendError(404, "not found");
+    return;
+  }
+  // The captive DNS answers every name with the AP address, so OS connectivity
+  // probes arrive here. Redirect them to the portal; that is what makes the
+  // "sign in to network" sheet appear on phones and desktop OSes.
+  server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("Location", portalUrl());
+  server.send(302, "text/html",
+              "<!doctype html><meta http-equiv=\"refresh\" content=\"0;url=/\">"
+              "<a href=\"/\">CRSF2PPM config portal</a>");
 }
 
 void webSetup() {
+  // WebServer drops request headers unless they are registered here.
+  static const char *kCollectedHeaders[] = {"X-Lang", "Accept-Language"};
+  server.collectHeaders(kCollectedHeaders, sizeof(kCollectedHeaders) / sizeof(kCollectedHeaders[0]));
+
   server.on("/", HTTP_GET, handleRoot);
   server.on("/api/status", HTTP_GET, handleStatus);
   server.on("/api/config", HTTP_GET, handleConfigGet);
@@ -324,12 +411,22 @@ void webStart() {
   server.begin();
   s_webStarted = true;
   Serial.println("[WEB] HTTP server on port 80");
+
+  // Captive portal: answer every DNS name with the AP address. The DHCP
+  // server hands out this address as the client's DNS server.
+  const IPAddress ap = WiFi.softAPIP();
+  if (s_dns.start(53, "*", ap)) {
+    Serial.printf("[WEB] captive DNS: * -> %s\n", ap.toString().c_str());
+  } else {
+    Serial.println("[WEB] captive DNS start failed");
+  }
 }
 
 void webStop() {
   if (!s_webStarted) {
     return;
   }
+  s_dns.stop();
   server.stop();
   s_webStarted = false;
   Serial.println("[WEB] HTTP server stopped");
@@ -337,6 +434,7 @@ void webStop() {
 
 void webLoop() {
   if (s_webStarted) {
+    s_dns.processNextRequest();
     server.handleClient();
   }
 }

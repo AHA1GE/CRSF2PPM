@@ -18,10 +18,12 @@ CRSF receiver GND ─► GND ───────────────┘   
 - CRSF input over UART: 420000 baud by default; 400000 and 115200 selectable.
 - Classic PPM output: 1–16 channels, default 8; 22.5 ms frame; 400 µs pulse.
 - Per-output channel mapping (any of the 16 CRSF channels to any PPM slot).
+- Per-output **reverse**: mirror any channel around 1500 µs without touching the flight controller.
 - Failsafe: preset values (default throttle slot 3 = 1000 µs) or hold-last.
 - Polarity, frame period, pulse width, baud, pins and failsafe timeout configurable.
 - Live web UI: channel bars, CRSF link statistics, mapping table, test mode.
-- Wi-Fi access point `CRSF2PPM-XXXX` (default password `crsf2ppm`), or AP+STA.
+- **Open** Wi-Fi access point `CRSF2PPM-XXXX` (no password) with a captive portal, or AP+STA.
+- Web UI in **English (en-US)** and **Simplified Chinese (zh-CN)**, auto-detected from the browser.
 - **Wi-Fi is off after every power-up**; the GPIO9 BOOT button toggles it.
 - Status LED on GPIO8: breathing = no link, solid = link, slow flash = Wi-Fi
   on, fast blink = latched fault (reset required).
@@ -35,19 +37,23 @@ CRSF receiver GND ─► GND ───────────────┘   
 2. Power the board. **Wi-Fi is off by default**; the status LED shows the CRSF
    link state.
 3. Press the **BOOT button (GPIO9)** to enable Wi-Fi. The LED starts flashing
-   slowly and the board starts an AP named `CRSF2PPM-XXXX`, where `XXXX` is
-   derived from the ESP32's AP MAC address. Press BOOT again to turn Wi-Fi off.
-4. Connect a phone/laptop to that AP with the password `crsf2ppm` and open
-   **http://192.168.4.1/** (or `http://crsf2ppm.local/`).
+   slowly and the board starts an **open** AP named `CRSF2PPM-XXXX`, where
+   `XXXX` is derived from the ESP32's AP MAC address. Press BOOT again to turn
+   Wi-Fi off.
+4. Connect a phone/laptop to that AP (no password). The captive portal should
+   open **http://192.168.4.1/** automatically; if it does not, browse there
+   manually (or use `http://crsf2ppm.local/`).
 5. Wire the CRSF receiver and flight controller as shown above, then set the
-   channel mapping, failsafe values and output timing in the web UI.
+   channel mapping, reverse flags, failsafe values and output timing in the
+   web UI.
 6. Use **Test mode** to sweep all outputs without a receiver. Verify with a
    servo or scope before connecting a flight controller.
 
-The default AP password can be changed in the **Network** card. The web UI has
-no login of its own, so use a strong WPA2 password if others share the area.
-After any reboot (including a settings change that reboots), Wi-Fi returns to
-OFF and must be enabled again with the BOOT button.
+The access point is deliberately **open and has no web login**. Anyone within
+range while Wi-Fi is on can join and change settings, so enable it on the bench
+and press BOOT again to turn it off before flight. After any reboot (including
+a settings change that reboots), Wi-Fi returns to OFF and must be enabled again
+with the BOOT button.
 
 ## Wiring
 
@@ -57,7 +63,7 @@ OFF and must be enabled again with the BOOT button.
 | PPM output | GPIO4 | RMT TX; 3.3 V logic. Configurable. |
 | Power | 5V / GND | Power the board from USB or a stable 5 V source. |
 | Ground | GND | Receiver, converter and flight controller grounds must be common. |
-| Status LED | GPIO8 | Resistor → LED → GND (active-high). Reserved. |
+| Status LED | GPIO8 | 3.3 V → resistor → LED → GPIO8 (active-low). Reserved. |
 | Wi-Fi button | GPIO9 / BOOT | Button to GND, usually onboard. Press **after boot**. Reserved. |
 
 Do not feed more than 3.3 V into a GPIO. ESP32-C3 GPIOs 11–17 are used by SPI
@@ -67,8 +73,9 @@ and PPM.
 
 ## Status LED and Wi-Fi button
 
-The status LED on **GPIO8** is active-high by default and driven with PWM for
-breathing. Priority is: latched fault, then Wi-Fi, then CRSF link.
+The status LED on **GPIO8** is **active-low** by default (the common SuperMini
+wiring: 3.3 V → resistor → LED → GPIO8) and driven with PWM for breathing.
+Priority is: latched fault, then Wi-Fi, then CRSF link.
 
 | Pattern | Meaning |
 |---|---|
@@ -89,8 +96,8 @@ is debounced in software. There is also a serial command `w` for the same toggle
 **GPIO8 is a strapping pin**, and many ESP32-C3 SuperMini boards fit a WS2812
 there instead of a plain LED. This firmware drives GPIO8 as a plain LED/PWM
 output, not a WS2812 data line; use a discrete LED (or check your board) for the
-status indication. If your LED is wired active-low, set
-`STATUS_LED_ACTIVE_LOW` to `1` in `led.cpp`.
+status indication. If your LED is wired GPIO8 → resistor → LED → GND
+(active-high), set `STATUS_LED_ACTIVE_LOW` to `0` in `led.cpp`.
 
 ## Build and flash
 
@@ -102,6 +109,10 @@ arduino-cli compile \
   --fqbn "esp32:esp32:esp32c3:CDCOnBoot=cdc,FlashSize=4M,PartitionScheme=huge_app,UploadSpeed=921600" \
   .
 
+# Erase the whole flash first (clears the NVS configuration, including Wi-Fi
+# settings). esptool v5 uses erase-flash; older versions use erase_flash.
+esptool --chip esp32c3 -p COMx erase-flash
+
 arduino-cli upload -p COMx \
   --fqbn "esp32:esp32:esp32c3:CDCOnBoot=cdc,FlashSize=4M,PartitionScheme=huge_app,UploadSpeed=921600" \
   .
@@ -110,6 +121,10 @@ arduino-cli upload -p COMx \
 - `CDCOnBoot=cdc` makes `Serial` use the ESP32-C3 USB-Serial/JTAG port, so the
   serial console works over USB.
 - `PartitionScheme=huge_app` gives 3 MB to the application; there is no OTA.
+- This is a DIY project and the configuration is not migrated across layout
+  changes, so **erase the flash before upgrading**. `esptool` is bundled with
+  the ESP32 core (under `packages/esp32/tools/esptool_py/`); some `arduino-cli`
+  versions also support `upload -e` (the bundled 1.2.0 does not).
 - If you use a board with a different flash size, change `FlashSize` and pick a
   suitable partition scheme. The binary is about 1.1 MB.
 
@@ -130,6 +145,10 @@ The output follows the conventional PPM sum format decoded by Betaflight's
   3 ms sync gap would exceed the configured period, the frame is extended
   automatically (relevant with many channels at extreme values).
 - Polarity can be inverted (idle high) for receivers/FCs that require it.
+- Each output can be **reversed** independently: the channel value is mirrored
+  around 1500 µs (`µs = 3000 − value`, so 800↔2200). Reverse applies to live
+  and test-mode values; preset failsafe values are final output pulse widths
+  and are not reversed.
 
 Betaflight's PPM decoder supports up to about 12 channels. The firmware can
 output up to 16, but use 8 (the default) for typical flight-controller PPM
@@ -165,24 +184,39 @@ controller's own failsafe checks before flight.
 
 ## Web interface
 
-Press BOOT (GPIO9) to enable Wi-Fi, then open `http://192.168.4.1/` while
-connected to the device AP.
+Press BOOT (GPIO9) to enable Wi-Fi. The AP is **open** (no password); join it and
+the captive portal opens `http://192.168.4.1/` automatically. If the OS does not
+show the portal, browse there manually.
 
 - **Live channels** — CRSF frame rate, PPM frame rate, RSSI/LQ/SNR, CRC errors,
   measured PPM period, channel bars and raw CRSF values.
-- **Channel mapping** — number of PPM outputs, source channel per output, and
-  per-slot failsafe value.
+- **Channel mapping** — number of PPM outputs, source channel and **reverse**
+  flag per output, and per-slot failsafe value.
 - **Output & failsafe** — frame period, pulse width, polarity, failsafe mode and
   timeout, CRSF baud.
-- **Network** — AP/STA status, AP password, optional STA credentials, CRSF RX
-  pin and PPM output pin.
+- **Network** — AP/STA status, optional STA credentials, CRSF RX pin and PPM
+  output pin.
 - **Test mode** — generates a slow sweep on every output without a receiver.
 - **Reboot** — restarts the converter.
+- **Language selector** (bottom bar) — Auto / English / 中文. Auto uses the
+  browser language (`zh*` → zh-CN, anything else → en-US); `?lang=zh-cn` or
+  `?lang=en-us` forces a language for one page load.
 
-Changing the CRSF/PPM pins, baud, AP password or STA credentials saves the config
-and reboots automatically. Mapping, timing, polarity and failsafe changes apply
-on the next PPM frame without a reboot. **After any reboot, Wi-Fi is off again;
+Changing the CRSF/PPM pins, baud or STA credentials saves the config and reboots
+automatically. Mapping, reverse, timing, polarity and failsafe changes apply on
+the next PPM frame without a reboot. **After any reboot, Wi-Fi is off again;
 press BOOT to re-enable it.**
+
+### Captive portal
+
+While Wi-Fi is on, the firmware runs a DNS server on port 53 that resolves
+**every** name to the AP address (`192.168.4.1`). OS connectivity probes
+(Android `generate_204`, Apple `hotspot-detect.html`, Windows `connecttest.txt`,
+Firefox `success.txt`, …) therefore reach the HTTP server, and any non-API path
+is answered with a `302` to the portal. That is what makes the "sign in to
+network" sheet open the config page. `/api/*` paths are never redirected; they
+return JSON (or a JSON 404) so scripts are unaffected. The DNS hijack stops when
+Wi-Fi is toggled off.
 
 ### HTTP API
 
@@ -193,19 +227,29 @@ All responses are JSON. `POST /api/config` and `/api/test` use
 |---|---|---|
 | GET | `/` | Web UI |
 | GET | `/api/status` | Live state: Wi-Fi, CRSF stats, raw/output channels, PPM stats, heap |
-| GET | `/api/config` | Stored configuration (passwords are never returned) |
+| GET | `/api/config` | Stored configuration (STA passwords are never returned) |
 | POST | `/api/config` | Update configuration; omitted fields keep their current value |
 | POST | `/api/test` | `on=1` / `on=0` toggles the output sweep |
 | POST | `/api/selftest` | Feeds a synthetic CRSF frame plus a bad-CRC frame into the parser |
 | POST | `/api/reboot` | Reboot the device |
+| GET | anything else | `302` to `/` (captive-portal probe redirect) |
+
+`/api/config` returns `map` (1-based source channels), `rev` (0/1 per output),
+`fs` (failsafe µs), timing, polarity, failsafe mode/timeout, baud and pins.
+`revN` in a POST sets the reverse flag for output `N` (0-based slot index, the
+same indexing as `mapN`/`fsN`).
 
 Example:
 
 ```bash
 curl http://192.168.4.1/api/status
-curl -X POST -d "count=8&frame_us=22500&failsafe_mode=preset" \
+curl -X POST -d "count=8&frame_us=22500&failsafe_mode=preset&rev1=1" \
      http://192.168.4.1/api/config
 ```
+
+API errors are English by default. Send `X-Lang: zh-CN` (or an
+`Accept-Language` header whose first tag is `zh`) to get the built-in error
+messages in Chinese.
 
 The self-test endpoint is for the bench only: it injects channel values
 172, 236, … 1132 and increments the CRC error counter to prove that bad frames
@@ -237,52 +281,68 @@ is not available.
 |---|---|
 | PPM outputs | 8 |
 | Mapping | output 1→CRSF 1, … output 16→CRSF 16 |
+| Per-output reverse | all off |
 | Failsafe values | 1500 µs; output 3 = 1000 µs |
 | Failsafe mode / timeout | preset / 500 ms |
 | Frame period / pulse width | 22500 µs / 400 µs |
 | Polarity | normal (idle low) |
 | CRSF baud / RX pin | 420000 / GPIO3 |
 | PPM pin | GPIO4 |
-| Status LED / Wi-Fi button | GPIO8 / GPIO9 (reserved) |
+| Status LED / Wi-Fi button | GPIO8 (active-low) / GPIO9 (reserved) |
 | Wi-Fi at power-up | OFF (BOOT button or serial `w` to enable) |
-| AP password | `crsf2ppm` |
+| AP security | open, no password; captive portal |
 | STA | disabled |
 
 ## Bench verification
 
-The firmware was compiled and flashed to ESP32-C3 boards (QFN32, rev v0.4,
-4 MB flash) and verified on the bench:
+Firmware 1.1.0 was compiled with ESP32 core 3.3.12, erase-flashed with
+`esptool erase-flash`, and uploaded to an ESP32-C3 board (QFN32, rev v0.4,
+4 MB flash, MAC `20:d5:c2:0d:8e:c4`, AP `CRSF2PPM-8EC5`) on COM201:
 
-- PPM runs at ~44 frames/s with a ~22.5 ms measured frame period and zero RMT
-  errors; test mode produced a clean channel sweep.
-- A live ELRS/CRSF receiver was verified on UART1: 75 frames/s, RSSI −38 dBm,
-  LQ 100 %, and the decoded channels matched the transmitter (AER centred,
-  throttle high).
+- Open AP: Windows joins `CRSF2PPM-8EC5` with authentication "open", no
+  password, 100 % signal, and receives `192.168.4.1` as the DHCP DNS server.
+- Captive portal: `Resolve-DnsName example.com -Server 192.168.4.1` answers
+  `192.168.4.1`; `GET /generate_204` with an OS-probe `Host` header returns
+  `302 Location: http://192.168.4.1/`; `/api/*` is never redirected and returns
+  JSON. Starting Wi-Fi, stopping it and starting it again restarts both the
+  HTTP server and the captive DNS.
+- UI language: the page was rendered in headless Chrome with browser language
+  `zh-CN` (auto-detect → all labels Chinese, `<html lang="zh-CN">`) and
+  `en-US` (→ English); `?lang=zh-cn` / `?lang=en-us` override the browser
+  choice. API validation errors switch to Chinese through `X-Lang` and
+  `Accept-Language`.
+- Per-channel reverse: with a live ELRS/CRSF link (74 fps, RSSI −50 dBm,
+  LQ 100 %), enabling reverse on outputs 3 and 5 changed 1000 → 2000 µs and
+  2000 → 1000 µs while the other outputs stayed unchanged; PPM stayed at
+  ~44 fps, ~22.5 ms period, zero RMT errors. A later run with the built-in
+  synthetic CRSF frame produced exactly
+  `988 1028 1932 1108 1852 1188 1228 1268` for reversed outputs 3/5, matching
+  `µs = 1500 + (raw − 992) × 5/8` followed by `3000 − µs`.
+- Preset failsafe values stay final output widths and are not reversed, as
+  designed (observed while no RC frames were arriving).
+- Wi-Fi is OFF at power-up; serial `w` (same action as the BOOT button) starts
+  and stops the AP. PPM output continued at ~44 fps with zero errors across a
+  Wi-Fi off/on cycle.
 - The CRSF parser self-test passes for a valid 16-channel frame and rejects a
   corrupted CRC frame.
-- The web page, `/api/status`, `/api/config`, `/api/test`, `/api/selftest`, and
-  `/api/reboot` were exercised; mapping CH3→output 1 produced the expected
-  1068 µs from raw 300, and both preset and hold failsafe behaviour were
-  observed.
-- Wi-Fi is OFF at power-up. Toggling with the serial `w` command (the same
-  action as the BOOT button) started/stopped the AP and HTTP server, and
-  `/api/status` returned HTTP 200 after a runtime Wi-Fi start.
-- The status LED state machine was verified through the reported `led` state:
-  breathing with no link, solid after a valid RC frame, slow flash while Wi-Fi
-  is on, and 5 Hz fast blink after a simulated latched fault. A reset cleared
-  the fault.
-- The complete feature set was bench-verified end to end after repairing an
-  open PPM signal wire: physical BOOT-button Wi-Fi toggling, LED patterns, web
-  UI, CRSF link, and PPM output to the flight controller.
-- Configuration survived reboots via NVS.
+- The status LED is driven **active-low** by default (the board owner confirmed
+  that wiring). The firmware reported the expected `breath`, `link`, `wifi` and
+  `error` modes through `/api/status` and the serial console.
+
+The CRSF receiver stopped producing frames during the final test pass (the
+transmitter/ELRS link was down; both the frame and CRC counters stayed at
+zero), so the last reverse check used the synthetic-frame self-test. The
+live-link reverse test passed earlier on the same reverse code.
 
 Not covered: an oscilloscope capture of the PPM waveform, joining an external
-STA network, and visual observation of the LED on every board variant. Some
-ESP32-C3 SuperMini boards drive a WS2812 from GPIO8 rather than a plain LED;
-this firmware does not drive WS2812 data. Validate your board's LED and PPM
-wiring before flight. PPM timing is generated in hardware, but the converter is
-not a certified safety device; always check failsafe and output behaviour with
-the flight controller disarmed/props removed.
+STA network, the OS captive-portal sheet on a physical phone (the probe
+responses were tested directly), the visual LED pattern after the active-low
+change, and persistence of the manual language selector. Some ESP32-C3
+SuperMini boards drive a WS2812 from GPIO8 rather than a plain LED; this
+firmware does not drive WS2812 data. Validate your board's LED and PPM wiring
+before flight. PPM timing is generated in hardware, but the converter is not a
+certified safety device; always check failsafe and output behaviour with the
+flight controller disarmed/props removed.
 
 ### Troubleshooting notes
 
@@ -292,8 +352,12 @@ the flight controller disarmed/props removed.
   running and PPM output is unaffected by HTTP stalls.
 - If the AP is not visible, Wi-Fi is off by default. Press the BOOT button
   (GPIO9) after boot or send `w` over USB serial. Check the serial log and the
-  status LED (slow flash = Wi-Fi on). If the last configured AP password is
-  unknown, `d` on the serial console restores defaults.
+  status LED (slow flash = Wi-Fi on). The AP is open, so there is no password
+  to lose; `d` on the serial console restores defaults if needed.
+- If joining the open AP does not open the config page automatically, browse to
+  `http://192.168.4.1/`. Some clients remember an old "no portal" decision for
+  the network; forget and rejoin the AP. The serial log prints
+  `[WEB] captive DNS: * -> 192.168.4.1` when the hijack is running.
 - If the status LED fast-blinks (5 Hz), a fault has latched and the board needs
   a reset. Run `s` over USB serial to see the stored error reason. A PPM/RMT
   failure or a failed Wi-Fi AP start sets this fault.
@@ -309,9 +373,17 @@ the flight controller disarmed/props removed.
 
 ## Security
 
-The AP uses WPA2 with the configured password, but the web API itself has no
-authentication. Anyone with the AP password can change settings. Do not expose
-the AP to untrusted users. STA mode keeps the AP enabled for configuration.
+The access point is **open and the web API has no authentication**. Anyone
+within radio range while Wi-Fi is enabled can join and change the configuration,
+including the PPM mapping and failsafe values. This is a bench/field setup
+convenience, not a secure interface:
+
+- Keep Wi-Fi off when flying or when the device is left unattended (it is off
+  after every power-up; press BOOT to turn it back off).
+- Do not leave the device powered with the AP enabled in a shared area.
+- STA mode keeps the AP enabled and open while Wi-Fi is on.
+- If the config is unknown or corrupted, erase-flash or send `d` over serial to
+  restore defaults.
 
 ## License
 
